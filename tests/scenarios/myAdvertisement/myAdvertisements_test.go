@@ -1,19 +1,21 @@
 package myAdvertisement
 
 import (
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-	"github.com/tidwall/gjson"
-
+	advertisementsClient "api-tests-template/internal/client/http/advertisements"
 	"api-tests-template/internal/managers/auth"
 	"api-tests-template/internal/managers/auth/models"
 	"api-tests-template/internal/managers/myAdvertisements"
-
 	base "api-tests-template/tests"
+
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"github.com/tidwall/gjson"
 )
 
 type TestSuite struct {
@@ -28,52 +30,241 @@ func TestSuiteRun(t *testing.T) {
 func (s *TestSuite) SetupSuite() {
 	base.SetupSuite()
 
-	base.Precondition("Авторизация пользователя с кредами из переменных окружения и получение его параметров")
-	s.loginData = auth.Login(s.T(), os.Getenv("TEST_LOGIN"), os.Getenv("TEST_PASSWORD"))
+	base.Precondition(
+		"Авторизация пользователя перед проверкой собственных объявлений",
+	)
+
+	s.loginData = auth.Login(
+		s.T(),
+		os.Getenv("TEST_LOGIN"),
+		os.Getenv("TEST_PASSWORD"),
+	)
 }
 
 func (s *TestSuite) TearDownSuite() {
 	base.TearDownSuite()
 }
 
-// Positive: Проверяем получение собственных объявлений в профиле
+// TestGetMyAdvertisementsPositive проверяет,
+// что созданное пользователем объявление
+// присутствует в списке его собственных объявлений.
 func (s *TestSuite) TestGetMyAdvertisementsPositive() {
-	var advertisementsBody string
-	s.Run("Получаем список собственных объявлений", func() {
-		advertisementsBody = myAdvertisements.GetMyAdvertisements(s.T(), s.loginData.Token, http.StatusOK, 50)
-	})
+	s.Run("Создаём и проверяем собственное объявление", func() {
+		token := s.loginData.Token
+		userID := s.loginData.User.Id
 
-	var items gjson.Result
-	s.Run("Проверяем, что у нас есть несколько добавленных ранее объявлений", func() {
-		items = gjson.Get(advertisementsBody, "items")
-		require.NotEmpty(s.T(), items.Array())
-	})
+		require.NotEmpty(
+			s.T(),
+			token,
+			"Токен авторизации отсутствует",
+		)
 
-	s.Run("Проверяем, что наши объявления имеют принадлежность к нашему пользователю и объявления имеют НЕ пустые параметры", func() {
+		require.NotEmpty(
+			s.T(),
+			userID,
+			"ID авторизованного пользователя отсутствует",
+		)
+
+		// Создаём собственное тестовое объявление с фотографией.
+		createResponse := advertisementsClient.HttpCreateAdvertisement(
+			s.T(),
+			token,
+			"../../../testdata/test_photo.png",
+		)
+
+		require.NotNil(
+			s.T(),
+			createResponse,
+			"Сервер не вернул ответ на создание объявления",
+		)
+
+		createBody, err := io.ReadAll(createResponse.Body)
+		createResponse.Body.Close()
+
+		require.NoError(
+			s.T(),
+			err,
+			"Не удалось прочитать ответ создания объявления",
+		)
+
+		advertisementID := gjson.GetBytes(
+			createBody,
+			"id",
+		).String()
+
+		require.NotEmpty(
+			s.T(),
+			advertisementID,
+			"Сервер не вернул ID созданного объявления",
+		)
+
+		log.Printf(
+			"Создано тестовое объявление: ID=%s",
+			advertisementID,
+		)
+
+		// Регистрируем удаление тестового объявления.
+		// Очистка сработает даже при ошибке проверок.
+		s.T().Cleanup(func() {
+			deleteResponse := advertisementsClient.HttpDeleteAdvertisement(
+				s.T(),
+				token,
+				advertisementID,
+			)
+
+			if deleteResponse != nil {
+				deleteResponse.Body.Close()
+			}
+
+			log.Printf(
+				"Удалено тестовое объявление: ID=%s",
+				advertisementID,
+			)
+		})
+
+		// Получаем список собственных объявлений.
+		advertisementsBody := myAdvertisements.GetMyAdvertisements(
+			s.T(),
+			token,
+			http.StatusOK,
+			50,
+		)
+
+		items := gjson.Get(
+			advertisementsBody,
+			"items",
+		)
+
+		require.True(
+			s.T(),
+			items.IsArray(),
+			"Сервер вернул некорректный список собственных объявлений",
+		)
+
+		// Ищем только созданное нами объявление.
+		var createdAdvertisement gjson.Result
+
 		for _, item := range items.Array() {
-			require.Equal(s.T(), s.loginData.User.Id, gjson.Get(item.String(), "user_id").String(), "user_id не совпадает")
-
-			require.NotEmpty(s.T(), gjson.Get(item.String(), "id").String(), "id пустое")
-			require.NotEmpty(s.T(), gjson.Get(item.String(), "created_at").String(), "created_at пустое")
-			require.NotEmpty(s.T(), gjson.Get(item.String(), "updated_at").String(), "updated_at пустое")
-			require.NotEmpty(s.T(), gjson.Get(item.String(), "title").String(), "Название пустое")
-			require.NotEmpty(s.T(), gjson.Get(item.String(), "description").String(), "Описание пустое")
-			require.True(s.T(), len(gjson.Get(item.String(), "photos").Array()) > 0, "Присутствуют пустые фотографии")
+			if item.Get("id").String() == advertisementID {
+				createdAdvertisement = item
+				break
+			}
 		}
+
+		require.True(
+			s.T(),
+			createdAdvertisement.Exists(),
+			"Созданное объявление %s отсутствует в списке собственных объявлений",
+			advertisementID,
+		)
+
+		// Проверяем принадлежность объявления пользователю.
+		require.Equal(
+			s.T(),
+			userID,
+			createdAdvertisement.Get("user_id").String(),
+			"Объявление принадлежит другому пользователю",
+		)
+
+		// Проверяем обязательные поля объявления.
+		require.Equal(
+			s.T(),
+			advertisementID,
+			createdAdvertisement.Get("id").String(),
+			"ID объявления не совпадает",
+		)
+
+		require.NotEmpty(
+			s.T(),
+			createdAdvertisement.Get("created_at").String(),
+			"Дата создания объявления отсутствует",
+		)
+
+		require.NotEmpty(
+			s.T(),
+			createdAdvertisement.Get("updated_at").String(),
+			"Дата изменения объявления отсутствует",
+		)
+
+		require.Equal(
+			s.T(),
+			"Тестовое объявление",
+			createdAdvertisement.Get("title").String(),
+			"Название объявления не совпадает",
+		)
+
+		require.Equal(
+			s.T(),
+			"Описание тестового объявления",
+			createdAdvertisement.Get("description").String(),
+			"Описание объявления не совпадает",
+		)
+
+		require.Equal(
+			s.T(),
+			float64(1500),
+			createdAdvertisement.Get("price").Float(),
+			"Цена объявления не совпадает",
+		)
+
+		require.Equal(
+			s.T(),
+			int64(1),
+			createdAdvertisement.Get("quantity").Int(),
+			"Количество товара не совпадает",
+		)
+
+		// Проверяем наличие загруженной фотографии.
+		photos := createdAdvertisement.Get("photos")
+
+		require.True(
+			s.T(),
+			photos.IsArray(),
+			"Поле photos должно содержать массив",
+		)
+
+		require.NotEmpty(
+			s.T(),
+			photos.Array(),
+			"У созданного объявления отсутствует фотография",
+		)
+
+		require.NotEmpty(
+			s.T(),
+			photos.Array()[0].Get("url").String(),
+			"У фотографии отсутствует URL",
+		)
+
+		log.Printf(
+			"Собственное объявление %s успешно проверено",
+			advertisementID,
+		)
 	})
 }
 
-// Negative: Проверяем 401 ошибку при попытке получить собственные объявления без токена
+// TestGetMyAdvertisementsIncorrectToken проверяет,
+// что запрос с неправильным токеном возвращает 401.
 func (s *TestSuite) TestGetMyAdvertisementsIncorrectToken() {
-	var advertisementsBody string
-	s.Run("Получаем список собственных объявлений с неправильным авторизационным токеном", func() {
-		advertisementsBody = myAdvertisements.GetMyAdvertisements(s.T(), "incorrect_token", http.StatusUnauthorized, 50)
-	})
+	s.Run("Получаем собственные объявления с неверным токеном", func() {
+		advertisementsBody := myAdvertisements.GetMyAdvertisements(
+			s.T(),
+			"incorrect_token",
+			http.StatusUnauthorized,
+			50,
+		)
 
-	s.Run("Проверяем, что показывается правильная ошибка", func() {
-		require.Equal(s.T(), "unauthorized", gjson.Get(advertisementsBody, "error").String(),
-			"Некорректное значение error параметра")
-		require.Equal(s.T(), "Invalid or expired token", gjson.Get(advertisementsBody, "message").String(),
-			"Некорректное значение message параметра")
+		require.Equal(
+			s.T(),
+			"unauthorized",
+			gjson.Get(advertisementsBody, "error").String(),
+			"Некорректный тип ошибки авторизации",
+		)
+
+		require.Equal(
+			s.T(),
+			"Invalid or expired token",
+			gjson.Get(advertisementsBody, "message").String(),
+			"Некорректное сообщение об ошибке авторизации",
+		)
 	})
 }

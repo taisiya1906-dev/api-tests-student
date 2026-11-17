@@ -12,7 +12,6 @@ import (
 )
 
 func GetAdvertisementsList(t *testing.T, token, text string) models.AdvertisementsList {
-
 	raw := advertisements.HttpGetAdvertisements(t, token, text)
 	defer raw.Body.Close()
 
