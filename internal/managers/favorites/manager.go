@@ -33,7 +33,7 @@ func readBody(t *testing.T, response *http.Response) []byte {
 func GetFavoritesIDs(t *testing.T, token string) []string {
 	t.Helper()
 
-	response := favoritesClient.HttpGetFavorites(t, token)
+	response := favoritesClient.HttpGetFavorites(t, token, http.StatusOK)
 	body := readBody(t, response)
 
 	result := gjson.ParseBytes(body)

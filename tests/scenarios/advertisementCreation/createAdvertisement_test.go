@@ -1,6 +1,7 @@
 package advertisementCreation
 
 import (
+	"api-tests-template/internal/constants/testdata"
 	"io"
 	"log"
 	"os"
@@ -56,7 +57,7 @@ func (s *TestSuite) TestAuthorization() {
 // получение по ID, поиск по названию и наличие фотографии.
 func (s *TestSuite) TestCreateAdvertisementPositive() {
 	s.Run("Создаём объявление со всеми параметрами и фотографией", func() {
-		photoPath := "../../../testdata/test_photo.png"
+		photoPath := testdata.PhotoPath
 
 		response := advertisementsClient.HttpCreateAdvertisement(
 			s.T(),

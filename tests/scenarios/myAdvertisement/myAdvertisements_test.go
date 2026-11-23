@@ -1,6 +1,7 @@
 package myAdvertisement
 
 import (
+	"api-tests-template/internal/constants/testdata"
 	"io"
 	"log"
 	"net/http"
@@ -69,7 +70,7 @@ func (s *TestSuite) TestGetMyAdvertisementsPositive() {
 		createResponse := advertisementsClient.HttpCreateAdvertisement(
 			s.T(),
 			token,
-			"../../../testdata/test_photo.png",
+			testdata.PhotoPath,
 		)
 
 		require.NotNil(

@@ -29,17 +29,19 @@ func HttpAddToFavorites(
 		Response
 }
 
-// HttpGetFavorites получает список избранного.
+// HttpGetFavorites получает список избранного
+// и проверяет ожидаемый HTTP-статус.
 func HttpGetFavorites(
 	t *testing.T,
 	token string,
+	expectedStatus int,
 ) *http.Response {
 	return api_runner.GetRunner().
 		Auth(token).
 		Create().
 		Get(favoritesPath).
 		Expect(t).
-		Status(http.StatusOK).
+		Status(expectedStatus).
 		End().
 		Response
 }

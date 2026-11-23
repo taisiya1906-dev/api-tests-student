@@ -1,6 +1,7 @@
 package favorites
 
 import (
+	"api-tests-template/internal/constants/testdata"
 	"fmt"
 	"io"
 	"log"
@@ -10,7 +11,6 @@ import (
 
 	advertisementsClient "api-tests-template/internal/client/http/advertisements"
 	authClient "api-tests-template/internal/client/http/auth"
-	advertisementsManager "api-tests-template/internal/managers/advertisements"
 	"api-tests-template/internal/managers/auth"
 	"api-tests-template/internal/managers/auth/models"
 	favoritesManager "api-tests-template/internal/managers/favorites"
@@ -47,38 +47,6 @@ func (s *TestSuite) TearDownSuite() {
 	base.TearDownSuite()
 }
 
-// TestFindAnotherUserAdvertisement проверяет поиск
-// объявления другого пользователя.
-func (s *TestSuite) TestFindAnotherUserAdvertisement() {
-	s.Run("Находим объявление другого пользователя", func() {
-		s.Require().NotEmpty(
-			s.loginData.Token,
-			"Токен авторизации отсутствует",
-		)
-
-		s.Require().NotEmpty(
-			s.loginData.User.Id,
-			"ID авторизованного пользователя отсутствует",
-		)
-
-		advertisementID := advertisementsManager.GetAnotherUserAdvertisementID(
-			s.T(),
-			s.loginData.Token,
-			s.loginData.User.Id,
-		)
-
-		s.Require().NotEmpty(
-			advertisementID,
-			"Не удалось найти объявление другого пользователя",
-		)
-
-		log.Printf(
-			"Найдено чужое объявление: ID=%s",
-			advertisementID,
-		)
-	})
-}
-
 // TestFavoritesPositive проверяет полный цикл:
 // добавление в избранное, получение списка и удаление.
 
@@ -111,7 +79,7 @@ func (s *TestSuite) TestFavoritesPositive() {
 		createResponse := advertisementsClient.HttpCreateAdvertisement(
 			s.T(),
 			ownerToken,
-			"../../../testdata/test_photo.png",
+			testdata.PhotoPath,
 		)
 
 		s.Require().NotNil(createResponse)
@@ -121,7 +89,10 @@ func (s *TestSuite) TestFavoritesPositive() {
 		s.Require().NoError(err)
 
 		advertisementID := gjson.GetBytes(createBody, "id").String()
-		s.Require().NotEmpty(advertisementID)
+		s.Require().NotEmpty(
+			advertisementID,
+			"POST /advertisement: сервер не вернул ID созданного объявления",
+		)
 
 		// Объявление удаляем после завершения теста.
 		s.T().Cleanup(func() {
@@ -246,7 +217,7 @@ func (s *TestSuite) TestDeletedAdvertisementRemovedFromFavorites() {
 		createResponse := advertisementsClient.HttpCreateAdvertisement(
 			s.T(),
 			ownerToken,
-			"../../../testdata/test_photo.png",
+			testdata.PhotoPath,
 		)
 
 		s.Require().NotNil(

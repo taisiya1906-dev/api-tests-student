@@ -1,12 +1,13 @@
 package favorites
 
 import (
+	"api-tests-template/internal/constants/testdata"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
+	"api-tests-template/internal/assertions"
 	advertisementsClient "api-tests-template/internal/client/http/advertisements"
 	authClient "api-tests-template/internal/client/http/auth"
 	favoritesClient "api-tests-template/internal/client/http/favorites"
@@ -16,8 +17,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// TestFavoritesNegative проверяет негативные сценарии
-// добавления объявлений в избранное.
+const nonexistentAdvertisementID = "00000000-0000-4000-8000-000000000001"
+
+// TestFavoritesNegative проверяет ошибки добавления в избранное.
 func (s *TestSuite) TestFavoritesNegative() {
 	token := s.loginData.Token
 
@@ -31,70 +33,51 @@ func (s *TestSuite) TestFavoritesNegative() {
 		"ID авторизованного пользователя отсутствует",
 	)
 
-	// Добавление несуществующего объявления.
 	s.Run("Несуществующее объявление", func() {
 		response := favoritesClient.HttpAddToFavorites(
 			s.T(),
 			token,
-			"00000000-0000-4000-8000-000000000001",
+			nonexistentAdvertisementID,
 			http.StatusNotFound,
 		)
 
-		s.Require().NotNil(
+		assertions.AssertAPIError(
+			s.T(),
 			response,
-			"Сервер не вернул ответ",
-		)
-		defer response.Body.Close()
-
-		body, err := io.ReadAll(response.Body)
-		s.Require().NoError(err)
-
-		s.Require().Equal(
 			"not_found",
-			gjson.GetBytes(body, "error").String(),
-			"Неверный тип ошибки",
-		)
-
-		s.Require().Equal(
 			"Advertisement not found",
-			gjson.GetBytes(body, "message").String(),
-			"Неверное сообщение об отсутствии объявления",
-		)
-
-		log.Printf(
-			"Несуществующее объявление: %s",
-			string(body),
 		)
 	})
 
-	// Попытка добавить собственное объявление.
 	s.Run("Добавление собственного объявления", func() {
 		createResponse := advertisementsClient.HttpCreateAdvertisement(
 			s.T(),
 			token,
-			"../../../testdata/test_photo.png",
+			testdata.PhotoPath,
 		)
 
 		s.Require().NotNil(
 			createResponse,
-			"Сервер не вернул ответ создания объявления",
+			"Сервер не вернул ответ на создание собственного объявления",
 		)
 
 		createBody, err := io.ReadAll(createResponse.Body)
 		createResponse.Body.Close()
-		s.Require().NoError(err)
 
-		advertisementID := gjson.GetBytes(
-			createBody,
-			"id",
-		).String()
+		s.Require().NoError(
+			err,
+			"Не удалось прочитать ответ на создание собственного объявления",
+		)
+
+		advertisementID := gjson.GetBytes(createBody, "id").String()
 
 		s.Require().NotEmpty(
 			advertisementID,
-			"Не получен ID созданного объявления",
+			"В ответе на создание собственного объявления отсутствует ID. Ответ: %s",
+			string(createBody),
 		)
 
-		// Очистка созданного объявления.
+		// Удаляем тестовое объявление после проверки.
 		s.T().Cleanup(func() {
 			deleteResponse := advertisementsClient.HttpDeleteAdvertisement(
 				s.T(),
@@ -114,33 +97,16 @@ func (s *TestSuite) TestFavoritesNegative() {
 			http.StatusForbidden,
 		)
 
-		s.Require().NotNil(response)
-		defer response.Body.Close()
-
-		body, err := io.ReadAll(response.Body)
-		s.Require().NoError(err)
-
-		s.Require().Equal(
+		assertions.AssertAPIError(
+			s.T(),
+			response,
 			"forbidden",
-			gjson.GetBytes(body, "error").String(),
-			"Неверный тип ошибки",
-		)
-
-		s.Require().Equal(
 			"Cannot add own advertisement to favorites",
-			gjson.GetBytes(body, "message").String(),
-			"Неверное сообщение о добавлении собственного объявления",
-		)
-
-		log.Printf(
-			"Собственное объявление: %s",
-			string(body),
 		)
 	})
 
-	// Попытка повторно добавить объявление в избранное.
 	s.Run("Повторное добавление в избранное", func() {
-		// Регистрируем второго тестового пользователя.
+		// Регистрируем второго пользователя.
 		secondUser := auth.RegisterTestUser(
 			s.T(),
 			authClient.RegisterRequest{
@@ -157,33 +123,35 @@ func (s *TestSuite) TestFavoritesNegative() {
 
 		s.Require().NotEmpty(
 			secondUser.Token,
-			"Токен второго пользователя отсутствует",
+			"После регистрации второго пользователя отсутствует токен",
 		)
 
 		// Основной пользователь создаёт объявление.
 		createResponse := advertisementsClient.HttpCreateAdvertisement(
 			s.T(),
 			token,
-			"../../../testdata/test_photo.png",
+			testdata.PhotoPath,
 		)
 
 		s.Require().NotNil(
 			createResponse,
-			"Сервер не вернул ответ создания объявления",
+			"Сервер не вернул ответ на создание объявления для повторного добавления",
 		)
 
 		createBody, err := io.ReadAll(createResponse.Body)
 		createResponse.Body.Close()
-		s.Require().NoError(err)
 
-		advertisementID := gjson.GetBytes(
-			createBody,
-			"id",
-		).String()
+		s.Require().NoError(
+			err,
+			"Не удалось прочитать ответ на создание объявления",
+		)
+
+		advertisementID := gjson.GetBytes(createBody, "id").String()
 
 		s.Require().NotEmpty(
 			advertisementID,
-			"Не получен ID созданного объявления",
+			"В ответе на создание объявления для повторного добавления отсутствует ID. Ответ: %s",
+			string(createBody),
 		)
 
 		// Регистрируем удаление объявления.
@@ -199,7 +167,7 @@ func (s *TestSuite) TestFavoritesNegative() {
 			}
 		})
 
-		// Первый раз добавляем объявление в избранное.
+		// Первое добавление должно быть успешным.
 		favoritesManager.AddFavorite(
 			s.T(),
 			secondUser.Token,
@@ -233,66 +201,32 @@ func (s *TestSuite) TestFavoritesNegative() {
 			http.StatusConflict,
 		)
 
-		s.Require().NotNil(response)
-		defer response.Body.Close()
-
-		body, err := io.ReadAll(response.Body)
-		s.Require().NoError(err)
-
-		s.Require().Equal(
+		assertions.AssertAPIError(
+			s.T(),
+			response,
 			"already_exists",
-			gjson.GetBytes(body, "error").String(),
-			"Неверный тип ошибки повторного добавления",
-		)
-
-		s.Require().Equal(
 			"Advertisement is already in favorites",
-			gjson.GetBytes(body, "message").String(),
-			"Неверное сообщение о повторном добавлении",
-		)
-
-		log.Printf(
-			"Повторное добавление: %s",
-			string(body),
 		)
 	})
 
-	// Добавление в избранное без авторизации.
 	s.Run("Добавление без авторизации", func() {
 		response := favoritesClient.HttpAddToFavorites(
 			s.T(),
 			"",
-			"00000000-0000-4000-8000-000000000001",
+			nonexistentAdvertisementID,
 			http.StatusUnauthorized,
 		)
 
-		s.Require().NotNil(response)
-		defer response.Body.Close()
-
-		body, err := io.ReadAll(response.Body)
-		s.Require().NoError(err)
-
-		s.Require().Equal(
+		assertions.AssertAPIError(
+			s.T(),
+			response,
 			"unauthorized",
-			gjson.GetBytes(body, "error").String(),
-			"Неверный тип ошибки авторизации",
-		)
-
-		s.Require().Equal(
 			"Authorization header required",
-			gjson.GetBytes(body, "message").String(),
-			"Неверное сообщение об отсутствии авторизации",
-		)
-
-		log.Printf(
-			"Без авторизации: %s",
-			string(body),
 		)
 	})
 }
 
-// TestRemoveFavoritesNegative проверяет негативные сценарии
-// удаления объявлений из избранного.
+// TestRemoveFavoritesNegative проверяет ошибки удаления из избранного.
 func (s *TestSuite) TestRemoveFavoritesNegative() {
 	token := s.loginData.Token
 
@@ -301,69 +235,54 @@ func (s *TestSuite) TestRemoveFavoritesNegative() {
 		"Токен авторизации отсутствует",
 	)
 
-	// Удаление несуществующего объявления.
 	s.Run("Удаляем несуществующее объявление из избранного", func() {
 		response := favoritesClient.HttpRemoveFromFavorites(
 			s.T(),
 			token,
-			"00000000-0000-4000-8000-000000000001",
+			nonexistentAdvertisementID,
 			http.StatusNotFound,
 		)
 
-		s.Require().NotNil(response)
-		defer response.Body.Close()
-
-		body, err := io.ReadAll(response.Body)
-		s.Require().NoError(err)
-
-		s.Require().Equal(
+		assertions.AssertAPIError(
+			s.T(),
+			response,
 			"not_found",
-			gjson.GetBytes(body, "error").String(),
-			"Неверный тип ошибки при удалении",
-		)
-
-		s.Require().Equal(
 			"Favorite entry not found",
-			gjson.GetBytes(body, "message").String(),
-			"Неверное сообщение при удалении несуществующей записи",
-		)
-
-		log.Printf(
-			"Удаление несуществующего объявления: %s",
-			string(body),
 		)
 	})
 
-	// Удаление из избранного без авторизации.
 	s.Run("Удаляем из избранного без авторизации", func() {
 		response := favoritesClient.HttpRemoveFromFavorites(
 			s.T(),
 			"",
-			"00000000-0000-4000-8000-000000000001",
+			nonexistentAdvertisementID,
 			http.StatusUnauthorized,
 		)
 
-		s.Require().NotNil(response)
-		defer response.Body.Close()
-
-		body, err := io.ReadAll(response.Body)
-		s.Require().NoError(err)
-
-		s.Require().Equal(
+		assertions.AssertAPIError(
+			s.T(),
+			response,
 			"unauthorized",
-			gjson.GetBytes(body, "error").String(),
-			"Неверный тип ошибки авторизации",
-		)
-
-		s.Require().Equal(
 			"Authorization header required",
-			gjson.GetBytes(body, "message").String(),
-			"Неверное сообщение об отсутствии авторизации",
+		)
+	})
+}
+
+// TestGetFavoritesWithoutAuthorization проверяет,
+// что GET /favorites без токена возвращает 401.
+func (s *TestSuite) TestGetFavoritesWithoutAuthorization() {
+	s.Run("Получаем избранное без авторизации", func() {
+		response := favoritesClient.HttpGetFavorites(
+			s.T(),
+			"",
+			http.StatusUnauthorized,
 		)
 
-		log.Printf(
-			"Удаление без авторизации: %s",
-			string(body),
+		assertions.AssertAPIError(
+			s.T(),
+			response,
+			"unauthorized",
+			"Authorization header required",
 		)
 	})
 }

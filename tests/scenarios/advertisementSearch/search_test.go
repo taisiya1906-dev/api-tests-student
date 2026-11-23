@@ -47,7 +47,10 @@ func (s *TestSuite) TearDownSuite() {
 
 func (s *TestSuite) TestSearchByTitle() {
 	list := advertisements.GetAdvertisementsList(s.T(), s.loginData.Token, searchMiddle)
-	s.Require().NotEmpty(list.Items, "В ответе есть хотя бы одно объявление")
+	s.Require().NotEmpty(
+		list.Items,
+		"GET /advertisements: список объявлений пуст, поиск проверить невозможно",
+	)
 	assertions.ContainsAdvertisementByTitle(s.T(), list.Items, existingAdTitle)
 }
 
